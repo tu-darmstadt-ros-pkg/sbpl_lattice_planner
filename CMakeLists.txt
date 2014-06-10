@@ -13,6 +13,8 @@ find_package(catkin REQUIRED COMPONENTS
 # Find SBPL
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SBPL REQUIRED sbpl)
+find_library(SBPL_LIBRARY NAMES sbpl PATHS ${SBPL_LIBRARY_DIRS} NO_DEFAULT_PATH)
+set(SBPL_LIBRARIES ${SBPL_LIBRARY})
 
 include_directories(include ${catkin_INCLUDE_DIRS} ${SBPL_INCLUDE_DIRS})
 link_directories(${catkin_LIBRARY_DIRS} ${SBPL_LIBRARY_DIRS})
