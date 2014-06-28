@@ -33,10 +33,10 @@ generate_messages(DEPENDENCIES geometry_msgs)
 # Since sbpl is found through pkg-config, we need to manually add its
 # libraries and include directories into catkin_package
 catkin_package(
-  INCLUDE_DIRS include ${SBPL_INCLUDE_DIRS}
-  LIBRARIES ${SBPL_LIBRARIES}
+  INCLUDE_DIRS include
+  LIBRARIES ${PROJECT_NAME}
   CATKIN_DEPENDS ${THIS_PACKAGE_ROS_DEPS} message_runtime
-  DEPENDS
+  DEPENDS SBPL
 )
 
 ##############################################################################
