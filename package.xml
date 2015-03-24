@@ -2,8 +2,11 @@
   <name>sbpl_lattice_planner</name>
   <version>0.1.11</version>
   <description>sbpl_lattice_planner</description>
-  <maintainer email="hersh@willowgarage.com">Dave Hershberger</maintainer>
-  <author>Michael Phillips</author>
+  <maintainer email="kohlbrecher@sim.tu-darmstadt.de">Stefan Kohlbrecher</maintainer>
+  
+  <author>Michael Phillips</author>  
+  <author>Johannes Meyer</author>
+  
   <license>BSD</license>
   <url>http://ros.org/wiki/sbpl_lattice_planner</url>
 
