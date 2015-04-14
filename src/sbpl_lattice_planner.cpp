@@ -42,13 +42,19 @@
 
 #include <costmap_2d/inflation_layer.h>
 
-using namespace std;
+#include <cmath>
+#include <numeric>
+#include <limits>
+
 using namespace ros;
+using namespace std;
 
 
 PLUGINLIB_DECLARE_CLASS(sbpl_latice_planner, SBPLLatticePlanner, sbpl_lattice_planner::SBPLLatticePlanner, nav_core::BaseGlobalPlanner);
 
-namespace sbpl_lattice_planner{
+
+namespace sbpl_lattice_planner
+{
 
 class LatticeSCQ : public StateChangeQuery{
   public:
@@ -77,74 +83,17 @@ class LatticeSCQ : public StateChangeQuery{
 };
 
 SBPLLatticePlanner::SBPLLatticePlanner()
-  : initialized_(false), costmap_ros_(NULL){
+  : initialized_(false), costmap_ros_(NULL), planner_(0){
 }
 
 SBPLLatticePlanner::SBPLLatticePlanner(std::string name, costmap_2d::Costmap2DROS* costmap_ros)
-  : initialized_(false), costmap_ros_(NULL){
+  : initialized_(false), costmap_ros_(NULL), planner_(0) {
   initialize(name, costmap_ros);
 }
 
 
-void SBPLLatticePlanner::initialize(std::string name, costmap_2d::Costmap2DROS* costmap_ros){
-  if(!initialized_){
-    ros::NodeHandle private_nh("~/"+name);
-    ros::NodeHandle nh(name);
-
-    ROS_INFO("Name is %s", name.c_str());
-
-    private_nh.param("planner_type", planner_type_, string("ARAPlanner"));
-    private_nh.param("allocated_time", allocated_time_, 10.0);
-    private_nh.param("initial_epsilon",initial_epsilon_,3.0);
-    private_nh.param("environment_type", environment_type_, string("XYThetaLattice"));
-    private_nh.param("forward_search", forward_search_, bool(false));
-    private_nh.param("primitive_filename",primitive_filename_,string(""));
-    private_nh.param("force_scratch_limit",force_scratch_limit_,500);
-
-    double nominalvel_mpersecs, timetoturn45degsinplace_secs;
-    private_nh.param("nominalvel_mpersecs", nominalvel_mpersecs, 0.4);
-    private_nh.param("timetoturn45degsinplace_secs", timetoturn45degsinplace_secs, 0.6);
-
-    int lethal_obstacle;
-    private_nh.param("lethal_obstacle",lethal_obstacle,20);
-    lethal_obstacle_ = (unsigned char) lethal_obstacle;
-    inscribed_inflated_obstacle_ = lethal_obstacle_-1;
-    sbpl_cost_multiplier_ = (unsigned char) (costmap_2d::INSCRIBED_INFLATED_OBSTACLE/inscribed_inflated_obstacle_ + 1);
-    ROS_DEBUG("SBPL: lethal: %uz, inscribed inflated: %uz, multiplier: %uz",lethal_obstacle,inscribed_inflated_obstacle_,sbpl_cost_multiplier_);
-
-    costmap_ros_ = costmap_ros;
-
-    std::vector<geometry_msgs::Point> footprint = costmap_ros_->getRobotFootprint();
-
-    if ("XYThetaLattice" == environment_type_){
-      ROS_DEBUG("Using a 3D costmap for theta lattice\n");
-      env_ = new EnvironmentNAVXYTHETALAT();
-    }
-    else{
-      ROS_ERROR("XYThetaLattice is currently the only supported environment!\n");
-      exit(1);
-    }
-
-    // check if the costmap has an inflation layer
-    // Warning: footprint updates after initialization are not supported here
-    unsigned char cost_possibly_circumscribed_tresh = 0;
-    for(std::vector<boost::shared_ptr<costmap_2d::Layer> >::const_iterator layer = costmap_ros_->getLayeredCostmap()->getPlugins()->begin();
-        layer != costmap_ros_->getLayeredCostmap()->getPlugins()->end();
-        ++layer) {
-      boost::shared_ptr<costmap_2d::InflationLayer> inflation_layer = boost::dynamic_pointer_cast<costmap_2d::InflationLayer>(*layer);
-      if (!inflation_layer) continue;
-
-      cost_possibly_circumscribed_tresh = inflation_layer->computeCost(costmap_ros_->getLayeredCostmap()->getCircumscribedRadius());
-    }
-
-    if(!env_->SetEnvParameter("cost_inscribed_thresh",costMapCostToSBPLCost(costmap_2d::INSCRIBED_INFLATED_OBSTACLE))){
-      ROS_ERROR("Failed to set cost_inscribed_thresh parameter");
-      exit(1);
-    }
-    if(!env_->SetEnvParameter("cost_possibly_circumscribed_thresh", costMapCostToSBPLCost(cost_possibly_circumscribed_tresh))){
-      ROS_ERROR("Failed to set cost_possibly_circumscribed_thresh parameter");
-      exit(1);
-    }
+void SBPLLatticePlanner::reinitEnv(double nominalvel_mpersecs, std::vector<geometry_msgs::Point> footprint, double timetoturn45degsinplace_secs)
+{
     int obst_cost_thresh = costMapCostToSBPLCost(costmap_2d::LETHAL_OBSTACLE);
     vector<sbpl_2Dpt_t> perimeterptsV;
     perimeterptsV.reserve(footprint.size());
@@ -179,6 +128,9 @@ void SBPLLatticePlanner::initialize(std::string name, costmap_2d::Costmap2DROS* 
       for (ssize_t iy(0); iy < costmap_ros_->getCostmap()->getSizeInCellsY(); ++iy)
         env_->UpdateCost(ix, iy, costMapCostToSBPLCost(costmap_ros_->getCostmap()->getCost(ix,iy)));
 
+    if(planner_)
+      delete planner_;
+
     if ("ARAPlanner" == planner_type_){
       ROS_INFO("Planning with ARA*");
       planner_ = new ARAPlanner(env_, forward_search_);
@@ -191,12 +143,78 @@ void SBPLLatticePlanner::initialize(std::string name, costmap_2d::Costmap2DROS* 
       ROS_ERROR("ARAPlanner and ADPlanner are currently the only supported planners!\n");
       exit(1);
     }
+}
+
+void SBPLLatticePlanner::initialize(std::string name, costmap_2d::Costmap2DROS* costmap_ros)
+{
+  if(!initialized_){
+    ros::NodeHandle private_nh("~/"+name);
+    ros::NodeHandle nh(name);
+
+    ROS_INFO("Name is %s", name.c_str());
+
+    private_nh.param("planner_type", planner_type_, string("ARAPlanner"));
+    private_nh.param("allocated_time", allocated_time_, 10.0);
+    private_nh.param("initial_epsilon",initial_epsilon_,3.0);
+    private_nh.param("environment_type", environment_type_, string("XYThetaLattice"));
+    private_nh.param("forward_search", forward_search_, bool(false));
+    private_nh.param("primitive_filename",primitive_filename_,string(""));
+    private_nh.param("force_scratch_limit",force_scratch_limit_,500);
+
+    private_nh.param("nominalvel_mpersecs", nominalvel_mpersecs_, 0.4);
+    private_nh.param("timetoturn45degsinplace_secs", timetoturn45degsinplace_secs_, 0.6);
+
+    int lethal_obstacle;
+    private_nh.param("lethal_obstacle",lethal_obstacle,20);
+    lethal_obstacle_ = (unsigned char) lethal_obstacle;
+    inscribed_inflated_obstacle_ = lethal_obstacle_-1;
+    sbpl_cost_multiplier_ = (unsigned char) (costmap_2d::INSCRIBED_INFLATED_OBSTACLE/inscribed_inflated_obstacle_ + 1);
+    ROS_DEBUG("SBPL: lethal: %uz, inscribed inflated: %uz, multiplier: %uz",lethal_obstacle,inscribed_inflated_obstacle_,sbpl_cost_multiplier_);
+
+    costmap_ros_ = costmap_ros;
+
+    if ("XYThetaLattice" == environment_type_)
+    {
+      ROS_DEBUG("Using a 3D costmap for theta lattice\n");
+      env_ = new EnvironmentNAVXYTHETALAT();
+    }
+    else
+    {
+      ROS_ERROR("XYThetaLattice is currently the only supported environment!\n");
+      exit(1);
+    }
+
+    // check if the costmap has an inflation layer
+    // Warning: footprint updates after initialization are not supported here
+    unsigned char cost_possibly_circumscribed_tresh = 0;
+    for(std::vector<boost::shared_ptr<costmap_2d::Layer> >::const_iterator layer = costmap_ros_->getLayeredCostmap()->getPlugins()->begin();
+        layer != costmap_ros_->getLayeredCostmap()->getPlugins()->end();
+        ++layer) {
+      boost::shared_ptr<costmap_2d::InflationLayer> inflation_layer = boost::dynamic_pointer_cast<costmap_2d::InflationLayer>(*layer);
+      if (!inflation_layer) continue;
+
+      cost_possibly_circumscribed_tresh = inflation_layer->computeCost(costmap_ros_->getLayeredCostmap()->getCircumscribedRadius());
+    }
+
+    if(!env_->SetEnvParameter("cost_inscribed_thresh",costMapCostToSBPLCost(costmap_2d::INSCRIBED_INFLATED_OBSTACLE))){
+      ROS_ERROR("Failed to set cost_inscribed_thresh parameter");
+      exit(1);
+    }
+    if(!env_->SetEnvParameter("cost_possibly_circumscribed_thresh", costMapCostToSBPLCost(cost_possibly_circumscribed_tresh))){
+      ROS_ERROR("Failed to set cost_possibly_circumscribed_thresh parameter");
+      exit(1);
+    }
+
+    std::vector<geometry_msgs::Point> footprint = costmap_ros_->getRobotFootprint();
+
+    reinitEnv(nominalvel_mpersecs_, footprint, timetoturn45degsinplace_secs_);
 
     ROS_INFO("[sbpl_lattice_planner] Initialized successfully");
     plan_pub_ = private_nh.advertise<nav_msgs::Path>("plan", 1);
     stats_publisher_ = private_nh.advertise<sbpl_lattice_planner::SBPLLatticePlannerStats>("sbpl_lattice_planner_stats", 1);
 
     initialized_ = true;
+    current_footprint_ = footprint;
   }
 }
 
@@ -235,6 +253,21 @@ void SBPLLatticePlanner::publishStats(int solution_cost, int solution_size,
   stats_publisher_.publish(stats);
 }
 
+float point32L2diff(geometry_msgs::Point const & lhs, geometry_msgs::Point const & rhs)
+{
+    return std::pow(lhs.x - rhs.x, 2) + std::pow(lhs.y - rhs.y, 2) + std::pow(lhs.z - rhs.z, 2);
+}
+
+double SBPLLatticePlanner::footprintL2Diff(std::vector<geometry_msgs::Point> const & lhs,
+                                           std::vector<geometry_msgs::Point> const & rhs)
+{
+    if(lhs.size() != rhs.size())
+        return std::numeric_limits<double>::infinity();
+    std::vector<double> diffs(lhs.size());
+    std::transform(lhs.begin(), lhs.end(), rhs.begin(), diffs.begin(), point32L2diff);
+    return std::accumulate(diffs.begin(), diffs.end(), 0.0);
+}
+
 bool SBPLLatticePlanner::makePlan(const geometry_msgs::PoseStamped& start,
                                  const geometry_msgs::PoseStamped& goal,
                                  std::vector<geometry_msgs::PoseStamped>& plan){
@@ -242,6 +275,17 @@ bool SBPLLatticePlanner::makePlan(const geometry_msgs::PoseStamped& start,
     ROS_ERROR("Global planner is not initialized");
     return false;
   }
+
+  std::vector<geometry_msgs::Point> new_footprint = costmap_ros_->getRobotFootprint();
+  if(footprintL2Diff(new_footprint, current_footprint_) > 0.05)
+  {
+      ROS_WARN("[sbpl_lattice_planner] Robot footprint changed significantly");
+      ROS_INFO("[sbpl_lattice_planner] Calling initialization of environment");
+      reinitEnv(nominalvel_mpersecs_, new_footprint, timetoturn45degsinplace_secs_);
+      current_footprint_ = new_footprint;
+      // start reinit
+  }
+
 
   plan.clear();
 

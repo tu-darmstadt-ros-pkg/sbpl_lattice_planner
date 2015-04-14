@@ -58,6 +58,7 @@ public:
 
   virtual ~SBPLLatticePlanner(){};
 
+  void reinitEnv(double nominalvel_mpersecs, std::vector<geometry_msgs::Point> footprint, double timetoturn45degsinplace_secs);
 private:
   unsigned char costMapCostToSBPLCost(unsigned char newcost);
   void publishStats(int solution_cost, int solution_size, 
@@ -66,7 +67,6 @@ private:
 
   bool initialized_;
 
-  SBPLPlanner* planner_;
   EnvironmentNAVXYTHETALAT* env_;
   
   std::string planner_type_; /**< sbpl method to use for planning.  choices are ARAPlanner and ADPlanner */
@@ -87,11 +87,19 @@ private:
 
 
   costmap_2d::Costmap2DROS* costmap_ros_; /**< manages the cost map for us */
+  SBPLPlanner* planner_;
+
+  double nominalvel_mpersecs_;
+  double timetoturn45degsinplace_secs_;
 
   ros::Publisher plan_pub_;
   ros::Publisher stats_publisher_;
-  
-  std::vector<geometry_msgs::Point> footprint_;
+
+
+  std::vector<geometry_msgs::Point> current_footprint_;
+  double footprintL2Diff(const std::vector<geometry_msgs::Point> &lhs, const std::vector<geometry_msgs::Point> &rhs);
+
+
 
 };
 };
