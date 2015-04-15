@@ -215,6 +215,8 @@ void SBPLLatticePlanner::initialize(std::string name, costmap_2d::Costmap2DROS* 
 
     initialized_ = true;
     current_footprint_ = footprint;
+    for(int i = 0; i < footprint.size(); i++)
+        ROS_INFO("%f %f", footprint[i].x, footprint[i].y );
   }
 }
 
