@@ -281,7 +281,7 @@ bool SBPLLatticePlanner::makePlan(const geometry_msgs::PoseStamped& start,
   {
       ROS_WARN("[sbpl_lattice_planner] Robot footprint changed significantly");
       ROS_INFO("[sbpl_lattice_planner] Calling initialization of environment");
-      // reinitEnv(nominalvel_mpersecs_, new_footprint, timetoturn45degsinplace_secs_);
+      reinitEnv(nominalvel_mpersecs_, new_footprint, timetoturn45degsinplace_secs_);
       // current_footprint_ = new_footprint;
       // start reinit
   }
